@@ -28,8 +28,7 @@ except Exception as e:
     print(f"TTS Engine Error: {e}")
 
 contacts = {
-    "owner": "+919938864548",
-    "gorilla" : "+919438287938"
+    
 }
 
 
