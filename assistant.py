@@ -10,6 +10,11 @@ import pyautogui as s
 from deep_translator import GoogleTranslator
 import wikipedia
 import google.generativeai as genai
+import os
+import pygame
+import asyncio
+import edge_tts
+from textblob import TextBlob
 
 # --- CONFIGURATION ---
 MIC_INDEX = 1  # Your Laptop Mic
@@ -25,31 +30,55 @@ contacts = {
     # "fafnir": "+918529637410" 
 }
 
-def speak(text):
-    print(f"Fafnir: {text}")
+
+# Initialize Pygame Mixer for playing audio
+pygame.mixer.init()
+
+async def generate_voice(text):
+    # Voices: "en-US-AriaNeural" (Female) or "en-US-GuyNeural" (Male)
+    voice = "en-US-AriaNeural" 
+    communicate = edge_tts.Communicate(text, voice)
+    await communicate.save("temp_voice.mp3")
+
+async def generate_emotional_voice(text, emotion):
+    voice = "en-IN-NeerjaNeural"  # Use "en-US-GuyNeural" for male
     
-    # 1. Wait a split second for the Mic to fully release the driver
-    t.sleep(0.5)
+    # DEFAULT SETTINGS (Neutral)
+    rate = "+0%"
+    pitch = "+0Hz"
+    
+    # ADJUST VOICE BASED ON EMOTION
+    if emotion == "happy":
+        rate = "+15%"    # Speak faster
+        pitch = "+5Hz"   # Higher pitch (sound excited)
+    elif emotion == "sad":
+        rate = "-15%"    # Speak slower
+        pitch = "-5Hz"   # Lower pitch (sound down)
+    elif emotion == "angry":
+        rate = "+10%"    # Fast
+        pitch = "-2Hz"   # Slightly deeper/serious
+    
+    # Generate the audio with these settings
+    communicate = edge_tts.Communicate(text, voice, rate=rate, pitch=pitch)
+    await communicate.save("temp_voice.mp3")
+
+def speak(text, emotion="neutral"):
+    print(f"Fafnir ({emotion}): {text}")
     
     try:
-        # 2. Re-initialize the engine FRESH every time.
-        # This prevents the "Loop Already Running" or "Silent" bugs.
-        local_engine = pyttsx3.init('sapi5')
+        # Generate audio
+        asyncio.run(generate_emotional_voice(text, emotion))
         
-        voices = local_engine.getProperty('voices')
-        try:
-            local_engine.setProperty('voice', voices[1].id) # Female
-        except:
-            local_engine.setProperty('voice', voices[0].id) # Male fallback
-
-        local_engine.say(text)
-        local_engine.runAndWait()
+        # Play audio
+        pygame.mixer.music.load("temp_voice.mp3")
+        pygame.mixer.music.play()
         
-        # 3. Clean up
-        del local_engine
-        
+        while pygame.mixer.music.get_busy():
+            pygame.time.Clock().tick(10)
+            
+        pygame.mixer.music.unload()
     except Exception as e:
-        print(f"TTS Error: {e}")
+        print(f"Audio Error: {e}")
 
 def listen(phrase_time_limit=5):
     global recognizer
@@ -105,6 +134,27 @@ def wish():
     else:
         greet = "Good Evening Sir"
     speak(f"{greet}")
+
+def get_emotion(query):
+    # 1. Check for specific keywords first (Manual Override)
+    query = query.lower()
+    if any(word in query for word in ["sad", "cry", "depressed", "heartbroken"]):
+        return "sad"
+    elif any(word in query for word in ["happy", "great", "joy", "excited", "wow"]):
+        return "happy"
+    elif any(word in query for word in ["angry", "mad", "hate", "stupid"]):
+        return "angry"
+    
+    # 2. Use TextBlob for automatic detection
+    analysis = TextBlob(query)
+    polarity = analysis.sentiment.polarity # Score from -1 to +1
+    
+    if polarity > 0.3:
+        return "happy"
+    elif polarity < -0.3:
+        return "sad"
+    else:
+        return "neutral"
 
 def search_wikipedia(query):
     speak("Searching Wikipedia...")
@@ -270,33 +320,51 @@ def system_control(command):
         speak("System muted")
 
 def command_mode():
+    # 1. Listen for the command
     query = listen()
     if not query:
         return
 
-    # --- SPECIFIC COMMANDS ---
+    # 2. Detect Emotion (Happy/Sad/Angry/Neutral)
+    # This determines HOW Fafnir speaks back to you
+    current_emotion = get_emotion(query)
+
+    # --- SPECIFIC COMMANDS (The Old Stuff) ---
+    
     if "send message to" in query:
         name = query.replace("send message to", "").strip()
+        # You can even pass the emotion to these functions if you update them
         send_whatsapp_message(name)
 
     elif "send message" in query:
         send_whatsapp_message()
 
     elif "open vs code" in query:
+        # We pass 'current_emotion' so he sounds happy if you are happy!
+        speak("Opening Visual Studio Code", current_emotion)
         open_vs_code()
 
+    elif "open whatsapp" in query:
+        speak("Opening WhatsApp", current_emotion)
+        s.press("win")
+        t.sleep(1)
+        s.write("whatsapp", interval=0.1)
+        t.sleep(1)
+        s.press("enter")
+
     elif "open youtube" in query:
+        # Note: Your open_youtube function handles its own speaking.
+        # Ideally, update open_youtube() to accept an 'emotion' argument too.
         open_youtube()
 
     elif "open google" in query:
         open_google()
         
-    # FIX: Combined duplicate 'play' commands into one
     elif "play" in query:
         play_on_youtube(query)
         
     elif "open github" in query:
-        speak("Opening Github")
+        speak("Opening Github", current_emotion)
         s.press("win")
         t.sleep(1)
         s.write("msedge", interval=0.1)
@@ -310,21 +378,30 @@ def command_mode():
     elif "wikipedia" in query or "who is" in query or "what is" in query:
         search_wikipedia(query)
         
-    elif "take screenshot" in query:
+    elif "screenshot" in query:
         take_screenshot()
         
     elif "volume" in query or "mute" in query:
         system_control(query)
 
     elif "stop" in query or "exit" in query:
-        speak("Goodbye")
+        speak("Goodbye, Sir.", current_emotion)
         sys.exit()
 
-    # --- AI FALLBACK ---
-    # FIX: This 'else' is now properly indented inside command_mode
-    # It only runs if NONE of the above 'elif' statements matched.
+    # --- AI FALLBACK (The New Stuff) ---
+    # If NONE of the above commands matched, ask the AI
     else:
-        ask_ai(query)
+        # If you are using Gemini
+        try:
+            # Generate the text answer
+            response = model.generate_content(query)
+            clean_text = response.text.replace("*", "").replace("#", "")
+            
+            # Speak it using the emotion detected earlier
+            speak(clean_text, current_emotion)
+        except Exception as e:
+            print(f"AI Error: {e}")
+            speak("I am having trouble connecting to the internet brain.", "sad")
 
 def run_fafnir():
     wish()
