@@ -7,69 +7,80 @@ import sys
 import datetime
 import pygetwindow as gw
 import pyautogui as s
-from googletrans import Translator
+from deep_translator import GoogleTranslator
 
 # --- CONFIGURATION ---
-# Based on your image, Index 2 is likely your main Laptop Mic.
-# If you use a headset, change this to 1.
-MIC_INDEX = 1
+MIC_INDEX = 2  # Your Laptop Mic
 
-# Initialize Recognizer
+# Initialize Recognizer Globally
 recognizer = sr.Recognizer()
 
-# Initialize Engine globally (Fixes crash/loop issues)
-try:
-    engine = pyttsx3.init('sapi5')
-    voices = engine.getProperty('voices')
-    # Try index 1 for female voice, 0 for male.
-    # If 1 gives an error, change to 0.
-    engine.setProperty('voice', voices[1].id)
-except Exception as e:
-    print(f"TTS Engine Error: {e}")
+# NOTE: We removed the global 'engine = ...' here. 
+# We will initialize it inside speak() instead.
 
 contacts = {
-    
+    # Add your contacts here
+    # "fafnir": "+918529637410" 
 }
 
-
 def speak(text):
-    print(f"Fafnir: {text}")  # Print so you can see it trying to speak
+    print(f"Fafnir: {text}")
+    
+    # 1. Wait a split second for the Mic to fully release the driver
+    t.sleep(0.5)
+    
     try:
-        engine.say(text)
-        engine.runAndWait()
-    except Exception as e:
-        print("TTS Error:", e)
+        # 2. Re-initialize the engine FRESH every time.
+        # This prevents the "Loop Already Running" or "Silent" bugs.
+        local_engine = pyttsx3.init('sapi5')
+        
+        voices = local_engine.getProperty('voices')
+        try:
+            local_engine.setProperty('voice', voices[1].id) # Female
+        except:
+            local_engine.setProperty('voice', voices[0].id) # Male fallback
 
+        local_engine.say(text)
+        local_engine.runAndWait()
+        
+        # 3. Clean up
+        del local_engine
+        
+    except Exception as e:
+        print(f"TTS Error: {e}")
 
 def listen(phrase_time_limit=5):
     global recognizer
 
-    # Energy threshold settings
     recognizer.dynamic_energy_threshold = True
     recognizer.pause_threshold = 1.0
 
-    with sr.Microphone(device_index=MIC_INDEX) as source:
-        print(f"\nListening via Mic Index {MIC_INDEX}...")
-        recognizer.adjust_for_ambient_noise(source, duration=0.5)
+    # FIX: Removed 'device_index=MIC_INDEX'
+    # using 'source=None' forces it to use the System Default Mic
+    try:
+        with sr.Microphone() as source:
+            print("\nListening via Default Microphone...")
+            
+            # This line caused your crash before; now it's wrapped in safety
+            recognizer.adjust_for_ambient_noise(source, duration=0.5)
 
-        try:
-            audio = recognizer.listen(source, timeout=5, phrase_time_limit=phrase_time_limit)
-        except sr.WaitTimeoutError:
-            print("... Time out (Silence)")
-            return ""
+            try:
+                audio = recognizer.listen(source, timeout=5, phrase_time_limit=phrase_time_limit)
+            except sr.WaitTimeoutError:
+                print("... Time out (Silence)")
+                return ""
+    except OSError:
+        print("ERROR: No microphone found! Check your Windows Sound Settings.")
+        return ""
 
     try:
         print("Recognizing...")
-        # We use 'hi-IN' because it captures both Hindi and English words well
         raw_query = recognizer.recognize_google(audio, language="hi-IN")
         print(f"User (Raw): {raw_query}")
 
-        # --- TRANSLATION LAYER ---
-        translator = Translator()
-        # Translate whatever was said into English
-        translated = translator.translate(raw_query, dest='en')
-        english_query = translated.text.lower()
-
+        english_query = GoogleTranslator(source='auto', target='en').translate(raw_query)
+        english_query = english_query.lower()
+        
         print(f"Translated to: {english_query}")
         return english_query
 
@@ -83,7 +94,6 @@ def listen(phrase_time_limit=5):
         print(f"... Translation/Error: {e}")
         return ""
 
-
 def wish():
     hour = int(datetime.datetime.now().hour)
     if hour >= 0 and hour < 12:
@@ -94,19 +104,15 @@ def wish():
         greet = "Good Evening Sir"
     speak(f"{greet}")
 
-
 def send_whatsapp_message(name=None):
-    # 1. Get the Contact Name
     if not name:
         speak("Who do you want to message?")
         name = listen()
 
-    # Check if contact exists in your dictionary
     if name not in contacts:
         speak(f"I couldn't find {name} in your contact list.")
         return
 
-    # 2. Get the Message
     speak(f"What should I say to {name}?")
     message = listen()
 
@@ -116,41 +122,30 @@ def send_whatsapp_message(name=None):
 
     speak(f"Sending message to {name}")
 
-    # 3. Open WhatsApp Desktop App
-    # This uses the Windows Run protocol to open the app quickly
     s.press("win")
     t.sleep(1)
-    s.write("whatsapp", interval = 0.1)
+    s.write("whatsapp", interval=0.1)
     t.sleep(1)
     s.press("enter")
 
-    # Wait for the app to open (Increase this if your PC is slow)
-    t.sleep(3)
+    t.sleep(3) # Wait for App to open
 
-    # 4. Search for the Contact
-    # CTRL+F focuses the search bar in WhatsApp Desktop
     s.hotkey('ctrl', 'f')
     t.sleep(1)
 
-    # Type the name exactly as it appears in your contacts dictionary
-    # (Ensure the key in your dictionary matches the saved name in WhatsApp)
-    # Using the name variable here (e.g., "fafnir")
     s.write(name)
-    t.sleep(2)  # Wait for search results
+    t.sleep(2)
 
-    # Select the contact (Press Down Arrow then Enter)
     s.press('down')
     t.sleep(0.5)
     s.press('enter')
     t.sleep(1)
 
-    # 5. Type and Send the Message
-    s.write(message, interval = 0.2)
+    s.write(message, interval=0.1)
     t.sleep(0.5)
     s.press('enter')
 
     speak("Message sent")
-
 
 def open_vs_code():
     try:
@@ -164,80 +159,113 @@ def open_vs_code():
             return
     except Exception:
         pass
+        
     speak("Opening Visual Studio Code")
     s.press("win")
     t.sleep(1)
-    s.write("vs code", interval = 0.1)
+    s.write("vs code", interval=0.1)
     t.sleep(1)
     s.press("enter")
 
+def open_youtube():
+    speak("Opening YouTube")
+    s.press("win")
+    t.sleep(1)
+    s.write("msedge", interval=0.1)
+    t.sleep(1)
+    s.press("enter")
+    
+    t.sleep(2) # Wait for Edge to open
+    
+    s.hotkey("ctrl", "l") # Highlight Address Bar
+    t.sleep(0.5)
+    s.write("www.youtube.com", interval=0.1)
+    s.press("enter")
 
+def open_google():
+    speak("Opening Google")
+    s.press("win")
+    t.sleep(1)
+    s.write("msedge", interval=0.1)
+    t.sleep(1)
+    s.press("enter")
+    
+    t.sleep(2)
+    
+    s.hotkey("ctrl", "l")
+    t.sleep(0.5)
+    s.write("www.google.com", interval=0.1)
+    s.press("enter")
+
+
+def play_on_youtube(query):
+    # Remove the word "play" to get the actual song name
+    video = query.replace("play", "").strip()
+    
+    if not video:
+        speak("What should I play?")
+        # Optional: Listen again if they didn't say a name
+        video = listen()
+        if not video:
+            return
+
+    speak(f"Playing {video} on YouTube")
+    
+    try:
+        # kit.playonyt automatically searches and plays the first result
+        kit.playonyt(video)
+    except Exception as e:
+        print(f"Error playing video: {e}")
+        speak("I couldn't play the video.")
 
 def command_mode():
     query = listen()
     if not query:
         return
 
-    if "play" in query:
-        song = query.replace("play", "").strip()
-        speak(f"Playing {song}")
-        kit.playonyt(song)
-
-    elif "send message to" in query:
-        # Extracts "fafnir" from "send message to fafnir"
+    if "send message to" in query:
         name = query.replace("send message to", "").strip()
         send_whatsapp_message(name)
 
     elif "send message" in query:
-        # If you didn't say the name, it will ask you inside the function
         send_whatsapp_message()
 
     elif "open vs code" in query:
         open_vs_code()
 
-    elif "open whatsapp" in query:
-        speak("Opening WhatsApp")
-        s.press("win")
-        t.sleep(1)
-        s.write("whatsapp", interval = 0.1)
-        t.sleep(1)
-        s.press("enter")
-
     elif "open youtube" in query:
-        speak("Opening YouTube")
-        s.press("win")
-        t.sleep(1)
-        s.write("edge", interval = 0.1)
-        t.sleep(1)
-        s.press("enter")
-        t.sleep(1)
-        s.press("search bar")
-        s.write("youtube", interval = 0.1)
-        s.press("enter")
+        open_youtube()
+
     elif "open google" in query:
-        speak("Opening Google")
-        webbrowser.open("https://www.google.com")
+        open_google()
+        
+    elif "play" in query:
+        song = query.replace("play", "").strip()
+        speak(f"Playing {song}")
+        kit.playonyt(song)
+        
     elif "open github" in query:
+        speak("Opening Github")
         s.press("win")
         t.sleep(1)
-        s.write("edge", interval = 0.1)
+        s.write("msedge", interval=0.1)
         t.sleep(1)
         s.press("enter")
-        t.sleep(1)
-        s.press("search bar")
-        s.write("github", interval = 0.1)
+        t.sleep(2)
+        s.hotkey("ctrl", "l")
+        s.write("www.github.com", interval=0.1)
         s.press("enter")
+    elif "play" in query:
+        play_on_youtube(query)
 
     elif "stop" in query or "exit" in query:
         speak("Goodbye")
         sys.exit()
 
-
 def run_fafnir():
     wish()
     while True:
         command_mode()
-
 
 if __name__ == "__main__":
     run_fafnir()
