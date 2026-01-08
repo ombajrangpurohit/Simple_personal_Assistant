@@ -8,9 +8,11 @@ import datetime
 import pygetwindow as gw
 import pyautogui as s
 from deep_translator import GoogleTranslator
+import wikipedia
+import google.generativeai as genai
 
 # --- CONFIGURATION ---
-MIC_INDEX = 2  # Your Laptop Mic
+MIC_INDEX = 1  # Your Laptop Mic
 
 # Initialize Recognizer Globally
 recognizer = sr.Recognizer()
@@ -103,6 +105,20 @@ def wish():
     else:
         greet = "Good Evening Sir"
     speak(f"{greet}")
+
+def search_wikipedia(query):
+    speak("Searching Wikipedia...")
+    # Remove command words to get the actual topic
+    query = query.replace("wikipedia", "").replace("search", "").replace("who is", "").replace("what is", "").strip()
+    
+    try:
+        # Get a short summary (2 sentences)
+        results = wikipedia.summary(query, sentences=2)
+        speak("According to Wikipedia")
+        print(results)
+        speak(results)
+    except Exception:
+        speak("I couldn't find any information on that topic.")
 
 def send_whatsapp_message(name=None):
     if not name:
@@ -197,6 +213,20 @@ def open_google():
     s.write("www.google.com", interval=0.1)
     s.press("enter")
 
+genai.configure(api_key="AIzaSyDoCZa9Ws3UNTWnPfgOWvIroyHYsy_HhS4")
+# 'gemini-1.5-flash' is the newer, faster model
+model = genai.GenerativeModel('gemini-flash-latest')
+
+def ask_ai(query):
+    try:
+        response = model.generate_content(query)
+        # Clean text (remove * or # symbols that AI uses for formatting)
+        clean_text = response.text.replace("*", "").replace("#", "")
+        speak(clean_text)
+    except Exception as e:
+        print(f"AI Error: {e}")
+        speak("I am having trouble connecting to the AI brain.")
+
 
 def play_on_youtube(query):
     # Remove the word "play" to get the actual song name
@@ -218,11 +248,33 @@ def play_on_youtube(query):
         print(f"Error playing video: {e}")
         speak("I couldn't play the video.")
 
+def take_screenshot():
+    speak("Taking screenshot")
+    # Save with a timestamp so files don't overwrite each other
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    # Make sure you create a 'screenshots' folder, or just save to C drive
+    s.screenshot(f"screenshot_{timestamp}.png")
+    speak("Screenshot saved")
+
+def system_control(command):
+    if "volume up" in command:
+        s.press("volumeup")
+        s.press("volumeup") # Press twice for noticeable change
+        speak("Volume increased")
+    elif "volume down" in command:
+        s.press("volumedown")
+        s.press("volumedown")
+        speak("Volume decreased")
+    elif "mute" in command:
+        s.press("volumemute")
+        speak("System muted")
+
 def command_mode():
     query = listen()
     if not query:
         return
 
+    # --- SPECIFIC COMMANDS ---
     if "send message to" in query:
         name = query.replace("send message to", "").strip()
         send_whatsapp_message(name)
@@ -239,10 +291,9 @@ def command_mode():
     elif "open google" in query:
         open_google()
         
+    # FIX: Combined duplicate 'play' commands into one
     elif "play" in query:
-        song = query.replace("play", "").strip()
-        speak(f"Playing {song}")
-        kit.playonyt(song)
+        play_on_youtube(query)
         
     elif "open github" in query:
         speak("Opening Github")
@@ -255,12 +306,25 @@ def command_mode():
         s.hotkey("ctrl", "l")
         s.write("www.github.com", interval=0.1)
         s.press("enter")
-    elif "play" in query:
-        play_on_youtube(query)
+
+    elif "wikipedia" in query or "who is" in query or "what is" in query:
+        search_wikipedia(query)
+        
+    elif "take screenshot" in query:
+        take_screenshot()
+        
+    elif "volume" in query or "mute" in query:
+        system_control(query)
 
     elif "stop" in query or "exit" in query:
         speak("Goodbye")
         sys.exit()
+
+    # --- AI FALLBACK ---
+    # FIX: This 'else' is now properly indented inside command_mode
+    # It only runs if NONE of the above 'elif' statements matched.
+    else:
+        ask_ai(query)
 
 def run_fafnir():
     wish()
