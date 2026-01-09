@@ -263,7 +263,7 @@ def open_google():
     s.write("www.google.com", interval=0.1)
     s.press("enter")
 
-genai.configure(api_key="AIzaSyDoCZa9Ws3UNTWnPfgOWvIroyHYsy_HhS4")
+genai.configure(api_key="PUT Y9UR API KEY HERE")
 # 'gemini-1.5-flash' is the newer, faster model
 model = genai.GenerativeModel('gemini-flash-latest')
 
